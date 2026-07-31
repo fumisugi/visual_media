@@ -1,0 +1,147 @@
+seed: 20260730
+
+paths:
+  coco_images: data/raw/val2017
+  coco_annotations: data/raw/annotations/instances_val2017.json
+  subset_manifest: data/processed/coco100_manifest.json
+  holdout_manifest: data/processed/coco100_holdout_manifest.json
+  final_holdout_manifest: data/processed/coco100_final_holdout_manifest.json
+  same_model_holdout_manifest: data/processed/coco100_same_model_holdout_manifest.json
+  prompt_prototype_holdout_manifest: data/processed/coco100_prompt_prototype_holdout_manifest.json
+  results_dir: results/yoloworld
+  improvement_results_dir: results/yoloworld/clear_improvement
+  same_model_results_dir: results/yoloworld/same_model_improvement
+  prompt_prototype_results_dir: results/yoloworld/prompt_prototype_improvement
+
+model:
+  name: yolov8s-worldv2.pt
+  device: 0
+  image_size: 640
+  raw_confidence: 0.01
+  internal_nms_iou: 0.70
+  max_detections: 300
+
+selection:
+  total_images: 100
+  validation_images: 30
+  pilot_images: 5
+  min_box_area: 1024
+  holdout_images: 100
+  holdout_seed: 20260731
+  final_holdout_seed: 20260801
+  same_model_holdout_seed: 20260802
+  prompt_prototype_holdout_seed: 20260803
+
+clear_improvement:
+  scale_model: yolov8m-worldv2.pt
+  scale_image_sizes: [640, 768]
+  scale_simplicity_tolerance: 0.01
+  image_sizes: [768, 960, 1280]
+  confidence_candidates: [0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.50]
+  nms_iou_candidates: [0.40, 0.50, 0.60, 0.70]
+  prompt_sets:
+    canonical: [car, couch, airplane, cup]
+    robust_category: [car, couch, aircraft, cup]
+  use_horizontal_flip: [false, true]
+  minimum_f1_gain: 0.03
+  maximum_map_drop: 0.01
+  support_iou_candidates: [0.40, 0.50, 0.60]
+  support_bonus_candidates: [0.00, 0.025, 0.05, 0.075, 0.10]
+  supplement_weight_candidates: [0.50, 0.70, 0.90]
+  supplement_min_support_candidates: [1, 2]
+  supplement_cluster_iou_candidates: [0.40, 0.50, 0.60]
+
+same_model_improvement:
+  final_holdout_quotas: {car: 28, couch: 28, airplane: 16, cup: 28}
+  screening_candidates_to_keep: 4
+  minimum_blur_mean_f1_gain: 0.05
+  maximum_clean_f1_drop: 0.01
+  blur_sigmas: [2.0, 4.0]
+  blur_candidates:
+    - {name: unsharp_r0.5_a1.5, method: unsharp, radius_factor: 0.5, amount: 1.5}
+    - {name: unsharp_r0.5_a3.0, method: unsharp, radius_factor: 0.5, amount: 3.0}
+    - {name: unsharp_r0.5_a4.5, method: unsharp, radius_factor: 0.5, amount: 4.5}
+    - {name: unsharp_r1.0_a1.5, method: unsharp, radius_factor: 1.0, amount: 1.5}
+    - {name: unsharp_r1.0_a3.0, method: unsharp, radius_factor: 1.0, amount: 3.0}
+    - {name: unsharp_r1.0_a4.5, method: unsharp, radius_factor: 1.0, amount: 4.5}
+    - {name: unsharp_r1.5_a1.5, method: unsharp, radius_factor: 1.5, amount: 1.5}
+    - {name: unsharp_r1.5_a3.0, method: unsharp, radius_factor: 1.5, amount: 3.0}
+    - {name: unsharp_r1.5_a4.5, method: unsharp, radius_factor: 1.5, amount: 4.5}
+    - {name: wiener_k0.001_b0.75, method: wiener, regularization: 0.001, blend: 0.75}
+    - {name: wiener_k0.003_b0.75, method: wiener, regularization: 0.003, blend: 0.75}
+    - {name: wiener_k0.010_b0.75, method: wiener, regularization: 0.010, blend: 0.75}
+    - {name: wiener_k0.001_b1.00, method: wiener, regularization: 0.001, blend: 1.00}
+    - {name: wiener_k0.003_b1.00, method: wiener, regularization: 0.003, blend: 1.00}
+    - {name: wiener_k0.010_b1.00, method: wiener, regularization: 0.010, blend: 1.00}
+
+prompt_prototype_improvement:
+  anchor_weights: [0.25, 0.50, 0.75]
+  screening_candidates_to_keep: 2
+  target_conditions: [synonym, hypernym]
+  minimum_mean_f1_gain: 0.05
+  minimum_fold_gain: 0.00
+  maximum_canonical_f1_drop: 0.01
+  maximum_mean_map_drop: 0.01
+  final_holdout_min_box_area: 256
+  final_holdout_quotas: {car: 31, couch: 32, airplane: 5, cup: 32}
+
+evaluation:
+  confidence: 0.25
+  match_iou: 0.50
+  tune_confidences: [0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+  tune_nms_ious: [0.40, 0.50, 0.60]
+  bootstrap_samples: 2000
+
+pilot_gate:
+  minimum_baseline_recall: 0.50
+  minimum_absolute_f1_change: 0.15
+
+improvement:
+  lowlight_brightness: 0.25
+  gamma_candidates: [0.40, 0.50, 0.60, 0.70]
+
+prompt_improvement:
+  variants:
+    photo_template: "a photo of {article} {category}"
+    scene_template: "{article} {category} in the image"
+    plural:
+      car: cars
+      couch: couches
+      airplane: airplanes
+      cup: cups
+  agreement_bonus_candidates: [0.00, 0.05, 0.10]
+
+categories:
+  car:
+    coco_id: 3
+    prompts: [car, automobile, motor vehicle]
+    quota: 25
+  couch:
+    coco_id: 63
+    prompts: [couch, sofa, seating furniture]
+    quota: 25
+  airplane:
+    coco_id: 5
+    prompts: [airplane, aircraft, flying vehicle]
+    quota: 25
+  cup:
+    coco_id: 47
+    prompts: [cup, mug, drinking container]
+    quota: 25
+
+corruptions:
+  - name: original
+    type: identity
+    value: 1.0
+  - name: brightness_0.50
+    type: brightness
+    value: 0.50
+  - name: brightness_0.25
+    type: brightness
+    value: 0.25
+  - name: blur_sigma_2
+    type: gaussian_blur
+    value: 2.0
+  - name: blur_sigma_4
+    type: gaussian_blur
+    value: 4.0

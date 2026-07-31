@@ -1,0 +1,459 @@
+\documentclass[lualatex,ja=standard,a4paper,10pt]{bxjsarticle}
+
+\geometry{margin=17mm,headheight=14pt}
+\usepackage{luatexja-fontspec}
+\setmainjfont{Noto Serif CJK JP}
+\setsansjfont{Noto Sans CJK JP}
+\setmonojfont{Noto Sans Mono CJK JP}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{xurl}
+\usepackage{titlesec}
+\usepackage[
+  colorlinks=true,
+  linkcolor=blue!45!black,
+  citecolor=blue!45!black,
+  urlcolor=blue!55!black,
+  pdfauthor={杉中史哉},
+  pdftitle={YOLO-WorldのFailure Case Analysisと改善}
+]{hyperref}
+
+\graphicspath{
+  {results/yoloworld/figures/}
+  {results/yoloworld/examples/}
+}
+\input{report/generated_metrics.tex}
+
+\definecolor{Accent}{HTML}{275D8C}
+\definecolor{DarkText}{HTML}{242A30}
+\definecolor{Muted}{HTML}{59636E}
+\definecolor{LightRule}{HTML}{D8DEE5}
+
+\captionsetup{
+  font=small,
+  labelfont={bf,color=Accent},
+  justification=centering
+}
+\setlist{nosep,leftmargin=2em}
+\setlength{\parindent}{1em}
+\setlength{\parskip}{0.10em}
+\renewcommand{\arraystretch}{1.13}
+\titlespacing*{\section}{0pt}{1.2ex plus 0.2ex minus 0.2ex}{0.5ex}
+\titlespacing*{\subsection}{0pt}{0.9ex plus 0.2ex minus 0.2ex}{0.35ex}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small YOLO-World Failure Case Analysis}
+\rhead{\small 映像メディア学レポート}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\newcommand{\result}[1]{\textbf{\color{Accent}#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\begin{document}
+
+\begin{center}
+  {\LARGE\sffamily\bfseries YOLO-WorldのFailure Case Analysisと改善\par}
+  \vspace{0.35em}
+  {\large\sffamily blur-aware前処理とcanonical-anchored text prototype\par}
+\end{center}
+\vspace{0.6em}
+
+\noindent
+\begin{tabularx}{\linewidth}{@{}>{\bfseries}lX>{\bfseries}lX@{}}
+氏名 & 杉中史哉 & 学籍番号 & 48-256421 \\
+研究科 & 情報理工学系研究科 & 学年 & 修士2年 \\
+専攻 & 電子情報学専攻 & 所属研究室 & 菅野研究室 \\
+研究テーマ & \multicolumn{3}{l}{映像からの競技用義足ブレードの3次元形状・姿勢推定} \\
+\end{tabularx}
+\vspace{0.5em}
+\hrule
+\vspace{0.7em}
+
+\section*{概要}
+
+CVPR 2024のopen-vocabulary物体検出器YOLO-WorldをCOCO 2017 valで評価した。
+強いGaussian blurとprompt表現の変更でRecall/F1が低下するFailure Caseを確認し、
+入力補正による改善を検証した。独立評価用100枚でblur-aware Wiener前処理は
+blur 2条件の平均F1を\SameModelBaselineBlurMeanFOne から
+\SameModelImprovedBlurMeanFOne（差\result{\SameModelBlurMeanFOneDelta}、
+95\%区間$[\SameModelBlurMeanFOneDeltaLow,\SameModelBlurMeanFOneDeltaHigh]$）へ改善した。
+別の独立評価用100枚でcanonical-anchored text prototypeはsynonym/hypernym平均F1を
+\PromptPrototypeBaselineTargetMeanFOne から\PromptPrototypeImprovedTargetMeanFOne へ
+改善した。
+
+\section{対象論文概要}
+
+対象論文はChengらの``YOLO-World: Real-Time Open-Vocabulary Object Detection''
+\cite{yoloworld}であり、CVPR 2024に採択された。学習時に固定されたカテゴリだけを
+扱う通常の物体検出器と異なり、テキストで指定した対象を実時間で検出する
+open-vocabulary物体検出器である。
+
+\section{手法理解}
+
+YOLO-WorldはYOLOv8 detector、CLIP text encoder、RepVL-PANから構成される。
+画像encoderが多段階の画像特徴を抽出し、text encoderがカテゴリ名をembeddingへ変換する。
+RepVL-PANではText-guided CSPLayerが言語情報を画像特徴へ注入し、
+Image-Pooling Attentionが画像情報を使ってtext embeddingを強化する。
+検出headはboxとobject embeddingを予測し、object--text類似度をカテゴリscoreとして扱う。
+
+学習では正例・負例の語彙を含むonline vocabularyとregion--text contrastive lossを用い、
+画像領域と語彙を対応付ける。推論ではpromptを先にoffline vocabulary embeddingへ変換する
+prompt-then-detect方式を採る。このembeddingは検出層の重みへ再パラメータ化できるため、
+入力画像ごとにtext encoderを再実行せず、open-vocabulary検出を効率化できる。
+
+\section{実行環境}
+
+検出器にはUltralytics版の公開重み
+\code{\SameModelName}を用い、ローカルのGPU \GPUName で実行した。
+driverは\DriverVersion、Pythonは\PythonVersion、PyTorchは\TorchVersion、
+Ultralyticsは\UltralyticsVersion である。評価では画像・GT box・検出器をそろえ、
+画像劣化とprompt表現の影響、および入力補正の効果を比較した。
+
+\subsection{再現手順}
+
+データ抽出、推論、評価、図表生成では共通の設定と乱数seedを用いた。
+ソースコード、実験条件、実行手順は
+\href{https://github.com/fumisugi/visual_media}{GitHub repository}に記載した。
+
+\section{Failure Case Analysis}
+
+\subsection{評価設計と指標}
+
+対象カテゴリは\code{car / couch / airplane / cup}である。COCO annotationのうち
+crowdを除き、bbox面積が1,024 pixel以上の対象を含む画像を固定seedで抽出した。
+F1評価ではconfidence降順に予測を処理し、同一カテゴリかつIoU 0.50以上の未対応GTへ
+greedy matchingした。一つのGTに複数予測が重なる場合、最初の一つだけをTrue Positive、
+残りをFalse Positiveとした。
+
+データは互いに重ならない5組、計500枚を用いた。最初の100枚はFailure Caseとprompt
+比較に用い、validation 30枚で条件を選択し、test 70枚で評価した。
+blur前処理は\SameModelDevelopmentImageCount 枚で方式とパラメータを選び、
+非重複の\SameModelHoldoutImageCount 枚で評価した。prompt prototypeは400枚で
+混合係数を選び、別の非重複100枚で評価した。評価用データを方式選択には使用していない。
+適格な\code{airplane}画像が限られたため、blur評価セットのカテゴリ構成は
+\code{car/couch/airplane/cup}=28/28/16/28とした。
+
+\begin{table}[H]
+\centering
+\caption{Canonical baselineのtest指標}
+\label{tab:baseline}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+P & R & F1 & mAP & AP50 & AP75 & AR@100 & F1 95\% CI \\
+\midrule
+\BaselinePrecision &
+\BaselineRecall &
+\BaselineFOne &
+\BaselineAP &
+\BaselineAPFifty &
+\BaselineAPSeventyFive &
+\BaselineARHundred &
+$[\BaselineFOneCILow,\BaselineFOneCIHigh]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+COCO mAPはIoU 0.50から0.95まで0.05刻みで平均したAP、AP50/AP75は各IoUにおける
+interpolated Precision--Recall曲線の面積、AR@100は1画像・カテゴリ当たり最大100予測の
+平均Recallである。APはraw confidence 0.01以上のranked predictionsから算出し、F1は
+固定またはvalidationで選択した動作thresholdで算出した。不確実性はtest画像を単位に
+2,000回再標本化したbootstrapで評価した。
+
+\subsection{画像劣化}
+
+入力画像、prompt、GT boxを固定し、明るさ倍率
+$1.0/0.5/0.25$とGaussian blur $\sigma=0/2/4$を比較した。
+通常画像からblur $\sigma=4$へ変えるとTPは
+\BaselineTP 件から\BlurTP 件、FNは\BaselineFN 件から\BlurFN 件へ変化した。
+Precisionは\BaselinePrecision から\BlurPrecision へ上がった一方、
+Recallは\BaselineRecall から\BlurRecall へ低下した。これは低confidenceの予測自体が
+減ったためであり、誤ったboxが急増するというより、対象に対応するboxを出せなくなる。
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.80\linewidth]{failure_image_corruptions.png}
+\caption{画像劣化条件ごとのPrecision、Recall、F1。
+同じtest \TestImageCount 枚、confidence 0.25、matching IoU 0.50で比較。}
+\label{fig:degradation}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{0.45\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{baseline_success.png}
+  \caption{通常画像ではGTと予測が一致。}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.45\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{failure_under_gaussian_blur_sigma4.png}
+  \caption{blur $\sigma=4$では対象を検出できない。}
+\end{subfigure}
+\caption{画像劣化Failure Caseの代表例。緑がGT、赤が予測。}
+\label{fig:blur-example}
+\end{figure}
+
+ぼけによって輪郭や局所textureが失われ、候補boxへ十分なconfidenceを与えられなくなった
+可能性がある。ただし内部特徴を可視化していないため、これは結果に整合する仮説であり、
+因果的に確認した説明ではない。
+
+\subsection{Prompt表現}
+
+元画像を固定し、canonical、synonym、hypernym、写真template
+（``a photo of a \dots''）、scene template（``a \dots in the image''）、
+複数形の6種類を比較した。全カテゴリ合計ではcanonical、synonym、hypernymのF1が
+\CanonicalPromptFOne、\SynonymPromptFOne、\HypernymPromptFOne となった。
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.48\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{failure_prompt_wording.png}
+  \caption{基本3表現のP/R/F1。}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.50\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{prompt_variant_recall_heatmap.png}
+  \caption{6表現のカテゴリ別Recall。}
+\end{subfigure}
+\caption{Prompt wordingによる検出性能の変化。画像とGTは固定。}
+\label{fig:prompt-sensitivity}
+\end{figure}
+
+\code{car}のtest Recallはcanonical \CarCanonicalRecall、synonym
+\CarSynonymRecall、hypernym \CarHypernymRecall だった。一方、
+\code{couch}のphoto/scene templateは\CouchPhotoRecall/\CouchSceneRecall、
+\code{cup}のcanonical/synonymは\CupCanonicalRecall/\CupSynonymRecall だった。
+同義語や説明句の効果は一様ではなく、カテゴリごとに適切な表現が異なる。
+
+この差は、text encoderが辞書的な同義関係だけでなく、事前学習データ中の語と画像の
+共起を反映するためと考えられる。広い上位概念は対象領域との対応が曖昧になり、
+canonical termよりconfidenceが下がる場合がある。したがって、全カテゴリへ同じ種類の
+言い換えを一律適用することは安全ではない。
+
+\section{改善内容}
+
+\subsection{Canonical-anchored text prototype}
+
+最初にnaive NMS ensemble、カテゴリ別prompt/threshold、prompt subset、weighted box
+fusionをvalidationだけで調整した。しかしvalidation全体F1で選ばれた
+\code{\PrimaryStrategy}はtest F1を\BaselineFOne から\PrimaryFOne へ低下させ、
+差\PrimaryDelta の95\%区間$[\PrimaryDeltaLow,\PrimaryDeltaHigh]$も0を含んだ。
+naive 3-prompt NMSも差\NaiveDelta、区間
+$[\NaiveDeltaLow,\NaiveDeltaHigh]$で、mAPは\BaselineAP から\NaiveAP へ下がった。
+複数promptのboxを足す方法ではFP増加とvalidation過適合を避けられなかった。
+
+そこで検出後のboxではなくtext embeddingを統合した。各カテゴリについて入力語
+$e_{\mathrm{input}}$とcanonical語$e_{\mathrm{canon}}$をCLIPで単位ベクトル化し、
+\[
+e_{\mathrm{proto}} =
+\operatorname{normalize}\left(
+(1-\alpha)e_{\mathrm{input}}+\alpha e_{\mathrm{canon}}
+\right)
+\]
+を1クラス1個のprototypeとしてYOLO-Worldへ与える。canonical入力では元のembeddingを
+そのまま使い、synonym/hypernymだけを補正する。開発用
+\PromptPrototypeDevelopmentImageCount 枚を4 foldに分け、
+$\alpha\in\{0.25,0.50,0.75\}$を比較した結果、
+$\alpha=\PromptPrototypeAnchorWeight$を選択した。
+synonym/hypernym平均F1差は\PromptPrototypeDevelopmentFOneDelta、95\%区間
+$[\PromptPrototypeDevelopmentFOneDeltaLow,\PromptPrototypeDevelopmentFOneDeltaHigh]$、
+最小fold差も\PromptPrototypeMinimumFoldGain だった。
+
+\subsection{Blur-aware Wiener前処理}
+
+改善前後でモデル、prompt、入力解像度、confidence thresholdを固定し、入力前処理だけを
+変更した。まず開発用30枚で古典的なunsharp maskとWiener deconvolutionを比較し、
+次に互いに重ならない3組、計\SameModelDevelopmentImageCount 枚を3 foldとして
+候補を比較した。各画像の離散Laplacian varianceからblurを判定し、blurの場合だけ
+Wiener deconvolution（regularization \WienerRegularization、元画像とのblend
+\WienerBlend）を適用した。開発用300枚ではblur 2条件の平均F1差が
+\SameModelDevelopmentFOneDelta、paired bootstrap 95\%区間は
+$[\SameModelDevelopmentFOneDeltaLow,\SameModelDevelopmentFOneDeltaHigh]$で、
+最小fold差も\SameModelMinimumFoldGain だった。
+
+\subsection{Gamma correction}
+
+明るさ25\%へ人工的に暗化した画像にpower-law gamma correctionを適用した。
+validationで$\gamma=0.40/0.50/0.60/0.70$を比較した。
+\ifnum\GammaValidationTieCount>1
+\GammaValidationTieCount 候補が最高F1で同率だったため、同率候補の中から
+変形が最も弱く1.0に近い$\gamma=\GammaValue$をtie-breakで選択した。
+\else
+最高F1だった$\gamma=\GammaValue$を選択した。
+\fi
+
+\section{改善前後比較}
+
+\subsection{Prompt prototype}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{prompt_prototype_final_holdout.png}
+\caption{評価用COCO val \PromptPrototypeHoldoutImageCount 枚におけるprompt表現別比較。
+canonicalは不変で、synonymとhypernymのF1/mAPが上昇した。}
+\label{fig:prompt-prototype}
+\end{figure}
+
+開発用400枚で選択した混合係数を、非重複の評価用100枚
+（GT \PromptPrototypeHoldoutGTCount 個）に適用した。適格なairplane画像が
+5枚に限られたため、最小box面積256、カテゴリ構成31/32/5/32とした。
+synonym/hypernym平均F1は
+\PromptPrototypeBaselineTargetMeanFOne から\PromptPrototypeImprovedTargetMeanFOne
+（差\result{\PromptPrototypeTargetMeanFOneDelta}、95\%区間
+$[\PromptPrototypeTargetMeanFOneDeltaLow,\PromptPrototypeTargetMeanFOneDeltaHigh]$）、
+平均mAPは\PromptPrototypeBaselineTargetMeanAP から
+\PromptPrototypeImprovedTargetMeanAP（差\PromptPrototypeTargetMeanAPDelta）へ上昇した。
+条件別F1はsynonymで\PromptPrototypeBaselineSynonymFOne から
+\PromptPrototypeImprovedSynonymFOne、hypernymで
+\PromptPrototypeBaselineHypernymFOne から\PromptPrototypeImprovedHypernymFOne だった。
+canonical F1は\PromptPrototypeBaselineCanonicalFOne のまま変わらない。
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.48\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{prompt_prototype_baseline.png}
+  \caption{hypernym入力では対象を検出できなかった。}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.48\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{prompt_prototype_improvement.png}
+  \caption{prototype補正後は2個の\code{car}を検出した。}
+\end{subfigure}
+\caption{Prompt prototypeによる改善例。緑がGT、赤が予測。}
+\label{fig:prompt-prototype-example}
+\end{figure}
+
+\subsection{Blur-aware Wiener前処理}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.90\linewidth]{same_model_blur_final_holdout.png}
+\caption{評価用COCO val \SameModelHoldoutImageCount 枚におけるWiener前処理の比較。
+cleanはほぼ維持し、強いblur（$\sigma=4$）を大きく回復した。}
+\label{fig:same-model-blur}
+\end{figure}
+
+開発用300枚で決定した前処理を、非重複の評価用\SameModelHoldoutImageCount 枚
+（car/couch/airplane/cup = 28/28/16/28、GT \SameModelHoldoutGTCount 個）に
+適用した。blur 2条件の平均F1は
+\SameModelBaselineBlurMeanFOne から\SameModelImprovedBlurMeanFOne へ上がり、
+差は\result{\SameModelBlurMeanFOneDelta}、95\%区間
+$[\SameModelBlurMeanFOneDeltaLow,\SameModelBlurMeanFOneDeltaHigh]$で、事前基準
+（差$\geq0.05$かつ区間下限$>0$）を満たした。clean F1は
+\SameModelBaselineCleanFOne から\SameModelImprovedCleanFOne
+（差\SameModelCleanFOneDelta）で、許容低下0.01以内だった。
+
+改善は主に$\sigma=4$で生じ、F1は
+\SameModelBaselineBlurFourFOne から\SameModelImprovedBlurFourFOne、mAPは
+\SameModelBaselineBlurFourAP から\SameModelImprovedBlurFourAP、Recallは
+\SameModelBaselineBlurFourRecall から\SameModelImprovedBlurFourRecall へ上昇した。
+一方$\sigma=2$ではF1
+\SameModelBaselineBlurTwoFOne から\SameModelImprovedBlurTwoFOne とほぼ同じで、
+mAPは\SameModelBaselineBlurTwoAP から\SameModelImprovedBlurTwoAP へわずかに低下した。
+したがって「全blurに一様に有効」ではなく「強いGaussian blurを回復する改善」である。
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[t]{0.48\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{same_model_blur_baseline.png}
+  \caption{blur $\sigma=4$では2機を見落とした。}
+\end{subfigure}\hfill
+\begin{subfigure}[t]{0.48\linewidth}
+  \centering
+  \includegraphics[width=\linewidth]{same_model_blur_improvement.png}
+  \caption{Wiener前処理後は同じモデルが2機を検出した。}
+\end{subfigure}
+\caption{同一画像・同一検出器における改善例。緑がGT、赤が予測。}
+\label{fig:same-model-example}
+\end{figure}
+
+blur状態は\SameModelDetectorCorrect/\SameModelDetectorTotal 入力で正しく分類された。
+clean 100枚中\SameModelCleanCorrect 枚をcleanと判定し、1枚だけ誤って補正したため、
+cleanでF1がわずかに低下した。
+
+\subsection{Gamma correction}
+
+test F1は
+\LowlightFOne から\GammaFOne、Recallは\LowlightRecall から\GammaRecall へ変化した。
+
+効果は小さく、単一splitで選ばれた$\gamma$の安定性は未確認である。また人工的な暗化は
+実環境のshot noiseやsensor noiseを再現せず、gamma correctionによるnoise増幅も
+評価していない。したがって、実写low-lightへの一般化は未確認である。
+
+\section{Limitations}
+
+\begin{itemize}
+  \item 互いに重ならない計500枚を使ったが、対象は4カテゴリに限られ、COCO全体や
+  別datasetの性能を表さない。適格なairplane画像が少なく、blur評価セットでは16枚、
+  prompt評価セットでは5枚であり、カテゴリ構成は完全には均衡していない。
+  \item text prototypeは入力語が既知canonicalカテゴリの同義・上位概念だと対応付けられる
+  前提を持つ。未知の自由記述、複数概念、誤ったmappingへの頑健性は未評価である。
+  \item blur-aware前処理は独立100枚で確認したが、利得は$\sigma=4$へ集中し、
+  $\sigma=2$のmAPはわずかに低下し、clean 1枚を誤補正した。追加時間も未測定である。
+  \item 人工的劣化は実環境のnoiseやmotion blurを完全には再現しない。内部特徴も
+  可視化していないため、失敗原因の説明は診断仮説に留まる。
+\end{itemize}
+
+次は実写defocus・motion blurで復元効果と前処理時間を測る。
+
+\section{生成AI利用内容}
+
+OpenAI Codexを要件整理、実験設計、コード、集計、図表、LaTeX草稿に使用した。
+生成内容は実行結果および参照文献と照合し、実験条件、数値、考察は著者が確認した。
+
+\section{考察}
+
+YOLO-Worldは強いblurとprompt変更でFailure Caseを示した。3-prompt NMSや
+validation選択法は一般化しなかったが、boxを増やさずtext embeddingをcanonicalへ
+anchorする方法は、独立評価用100枚でsynonym/hypernym平均F1を
+\PromptPrototypeBaselineTargetMeanFOne から\PromptPrototypeImprovedTargetMeanFOne へ
+改善し、mAPも上昇した。canonical入力の結果は変えていない。
+
+blur-aware Wiener前処理は開発用300枚で方式を選択し、非重複の評価用100枚で
+検証した。比較条件をそろえた結果、
+blur 2条件の平均F1を\SameModelBaselineBlurMeanFOne から
+\SameModelImprovedBlurMeanFOne へ改善し、paired区間の下限も0より上だった。
+特に強いblurでF1とmAPがともに回復した一方、軽いblurとcleanでの小さな不利益も示した。
+2つのFailure Caseそれぞれへ直接対応し、手法選択用データと評価用データを分離したことが
+本実験の主要な知見である。
+
+\footnotesize
+\begin{thebibliography}{9}
+\setlength{\itemsep}{0pt}
+\setlength{\parskip}{0pt}
+\bibitem{yoloworld}
+T. Cheng et al.,
+``YOLO-World: Real-Time Open-Vocabulary Object Detection,''
+CVPR, 2024.
+\href{https://openaccess.thecvf.com/content/CVPR2024/html/Cheng_YOLO-World_Real-Time_Open-Vocabulary_Object_Detection_CVPR_2024_paper.html}{CVF Open Access}
+
+\bibitem{official}
+AILab-CVC,
+``Official YOLO-World implementation.''
+\href{https://github.com/AILab-CVC/YOLO-World}{GitHub repository}
+
+\bibitem{ultralytics}
+Ultralytics,
+``YOLO-World documentation.''
+\href{https://docs.ultralytics.com/models/yolo-world/}{Ultralytics documentation}
+
+\bibitem{coco}
+COCO Consortium,
+``Common Objects in Context.''
+\href{https://cocodataset.org/}{COCO website}
+\end{thebibliography}
+
+\end{document}
