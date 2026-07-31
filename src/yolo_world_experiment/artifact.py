@@ -852,9 +852,10 @@ def create_artifact(config: dict[str, Any]) -> Path:
                 "type": "markdown",
                 "body": (
                     "## 生成AI利用と参考文献\n\n"
-                    "Codexを課題要件整理、候補論文比較、実験設計、環境構築、評価コード、集計、"
-                    "図表、文章草稿に使用した。生成内容は実行結果および参照文献と照合し、"
-                    "実験条件、数値、考察は著者が確認した。\n\n"
+                    "著者が対象論文、Failure Case、評価条件、改善の採否基準、結果の解釈を決定した。"
+                    "Codexは著者の指示に基づく実装、実験実行、集計、図表、文章草稿、"
+                    "整合性確認の補助に使用した。生成内容は実行結果と照合し、著者が"
+                    "主張範囲、考察、表現を確認・修正した。\n\n"
                     "1. Cheng et al., *YOLO-World*, CVPR 2024.\n"
                     "2. AILab-CVC, Official YOLO-World implementation.\n"
                     "3. Ultralytics YOLO-World documentation.\n"
