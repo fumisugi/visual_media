@@ -4,6 +4,8 @@ CVPR 2024論文 **YOLO-World: Real-Time Open-Vocabulary Object Detection** の�
 
 Repository: <https://github.com/fumisugi/visual_media>
 
+生成AI利用ログ: [doc/AI_USAGE_LOG.md](doc/AI_USAGE_LOG.md)
+
 ## 実験設計
 
 - モデル: `yolov8s-worldv2.pt`（Failure Case・改善前後で固定）

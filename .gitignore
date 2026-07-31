@@ -1,6 +1,6 @@
 data/
 results/
-doc/
+doc/HANDOFF.md
 models/
 *.pt
 *.pth
